@@ -1,0 +1,4 @@
+/cleanVenv
+*.xlsx
+*.csv
+*.pyc
