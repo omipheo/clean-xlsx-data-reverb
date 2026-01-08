@@ -121,31 +121,58 @@ def is_person_name_simple(value):
     
     return False  # Default to False if no common name detected
 
+def clean_pedal_name(value):
+    """Remove unwanted prefixes from pedal names"""
+    if value is None or not isinstance(value, str):
+        return value
+
+    value = str(value).strip()
+
+    # Remove leading asterisks and spaces: "* Pedal Name" -> "Pedal Name"
+    value = re.sub(r'^\*+\s*', '', value)
+
+    # Remove list-style numbering with period: "1. Pedal Name" -> "Pedal Name"
+    value = re.sub(r'^\d+\.\s*', '', value)
+
+    # Remove list-style numbering with parenthesis: "1) Pedal Name" -> "Pedal Name"
+    # Only matches number followed by ) and space
+    value = re.sub(r'^\d+\)\s+', '', value)
+
+    # Remove standalone numbers at the start that are followed by at least 2 spaces or a lowercase word
+    # This catches "9  Henretta" but keeps "2024 Gibson" and "79 mxr"
+    # Pattern: number at start, followed by multiple spaces, then a capital letter
+    value = re.sub(r'^\d+\s{2,}(?=[A-Z])', '', value)
+
+    # Remove any remaining leading whitespace
+    value = value.strip()
+
+    return value
+
 def is_pedal_name(value):
     """Check if this looks like a pedal name"""
     if value is None or not isinstance(value, str):
         return False
-    
+
     # Skip these rows
     skip_keywords = ['total', 'fmv', '$20 less', 'label', 'needs', 'for lot', 'payout']
     value_lower = value.lower()
     if any(keyword in value_lower for keyword in skip_keywords):
         return False
-    
+
     # If it contains typical pedal-related words or brand names
-    pedal_indicators = ['pedal', 'reverb', 'delay', 'overdrive', 'distortion', 'fuzz', 
+    pedal_indicators = ['pedal', 'reverb', 'delay', 'overdrive', 'distortion', 'fuzz',
                         'chorus', 'flanger', 'wah', 'boost', 'compressor', 'looper',
-                        'boss', 'mxr', 'tc electronic', 'digitech', 'ibanez', 
+                        'boss', 'mxr', 'tc electronic', 'digitech', 'ibanez',
                         'dunlop', 'walrus', 'eqd', 'keeley', 'jhs', 'wampler',
                         'line 6', 'behringer', 'mooer', 'pigtronix', 'earthquaker']
-    
+
     if any(indicator in value_lower for indicator in pedal_indicators):
         return True
-    
+
     # If it has mixed case and some length, could be a pedal
     if len(value) > 5 and any(c.isalpha() for c in value):
         return True
-    
+
     return False
 
 def clean_spreadsheet(input_file):
@@ -198,21 +225,21 @@ def clean_spreadsheet(input_file):
         
         # Check for pedal in column A with price in column B
         if col_a and is_pedal_name(col_a):
-            pedal_name = str(col_a).strip()
+            pedal_name = clean_pedal_name(col_a)
             price = None
-            
+
             # Check column B for price
             if is_valid_price(col_b):
                 price = convert_date_to_price(col_b)
                 if is_date_value(price):
                     price = None
-            
+
             # If no price in B, check column C
             if price is None and is_valid_price(col_c):
                 price = convert_date_to_price(col_c)
                 if is_date_value(price):
                     price = None
-            
+
             if price is not None and isinstance(price, (int, float)):
                 cleaned_data.append({
                     'person': current_person if current_person else 'Unknown',
@@ -223,20 +250,20 @@ def clean_spreadsheet(input_file):
         
         # Check for pedal in column D with price in column E
         if col_d and is_pedal_name(col_d):
-            pedal_name = str(col_d).strip()
+            pedal_name = clean_pedal_name(col_d)
             price = None
-            
+
             if is_valid_price(col_e):
                 price = convert_date_to_price(col_e)
                 if is_date_value(price):
                     price = None
-            
+
             # If no price in E, check column F
             if price is None and is_valid_price(col_f):
                 price = convert_date_to_price(col_f)
                 if is_date_value(price):
                     price = None
-            
+
             if price is not None and isinstance(price, (int, float)):
                 cleaned_data.append({
                     'person': current_person if current_person else 'Unknown',
@@ -247,14 +274,14 @@ def clean_spreadsheet(input_file):
         
         # Check for pedal in column F with price in column G
         if col_f and is_pedal_name(col_f):
-            pedal_name = str(col_f).strip()
+            pedal_name = clean_pedal_name(col_f)
             price = None
-            
+
             if is_valid_price(col_g):
                 price = convert_date_to_price(col_g)
                 if is_date_value(price):
                     price = None
-            
+
             if price is not None and isinstance(price, (int, float)):
                 cleaned_data.append({
                     'person': current_person if current_person else 'Unknown',
@@ -270,10 +297,10 @@ def clean_spreadsheet(input_file):
                 # Try to get pedal name from column A or D
                 pedal_name = None
                 if col_a and is_pedal_name(col_a):
-                    pedal_name = str(col_a).strip()
+                    pedal_name = clean_pedal_name(col_a)
                 elif col_d and is_pedal_name(col_d):
-                    pedal_name = str(col_d).strip()
-                
+                    pedal_name = clean_pedal_name(col_d)
+
                 if pedal_name:
                     cleaned_data.append({
                         'person': current_person if current_person else 'Unknown',
