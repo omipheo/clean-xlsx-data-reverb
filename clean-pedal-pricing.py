@@ -121,12 +121,46 @@ def is_person_name_simple(value):
     
     return False  # Default to False if no common name detected
 
+def extract_condition(text):
+    """Extract condition from pedal description"""
+    if not text or not isinstance(text, str):
+        return None
+
+    text_lower = text.lower()
+
+    # Common condition phrases
+    conditions = [
+        'mint condition',
+        'excellent condition',
+        'very good condition',
+        'good condition',
+        'fair condition',
+        'mint',
+        'excellent',
+        'very good',
+        'good',
+        'fair'
+    ]
+
+    for condition in conditions:
+        if condition in text_lower:
+            # Return the condition with proper capitalization
+            return condition.title()
+
+    return None
+
 def clean_pedal_name(value):
-    """Remove unwanted prefixes from pedal names"""
+    """Remove unwanted prefixes and extra details from pedal names"""
     if value is None or not isinstance(value, str):
         return value
 
     value = str(value).strip()
+
+    # Remove leading hyphens: "-Pedal Name" -> "Pedal Name"
+    value = re.sub(r'^-+\s*', '', value)
+
+    # Remove leading periods: ".Pedal Name" -> "Pedal Name"
+    value = re.sub(r'^\.+\s*', '', value)
 
     # Remove leading asterisks and spaces: "* Pedal Name" -> "Pedal Name"
     value = re.sub(r'^\*+\s*', '', value)
@@ -143,8 +177,29 @@ def clean_pedal_name(value):
     # Pattern: number at start, followed by multiple spaces, then a capital letter
     value = re.sub(r'^\d+\s{2,}(?=[A-Z])', '', value)
 
+    # Remove condition and accessory details (case-insensitive)
+    # Common patterns to remove
+    patterns_to_remove = [
+        r'\.\s*(with|w/|no|doesn\'t have|without|in).*',  # Everything after period followed by these words
+        r'\s+with box.*',
+        r'\s+w/ box.*',
+        r'\s+no box.*',
+        r'\s+without box.*',
+        r'\s+with power supply.*',
+        r'\s+and power supply.*',
+        r'\s+in (mint|excellent|very good|good|fair) condition.*',
+        r'\s+(mint|excellent|very good|good|fair) condition.*',
+        r'\s+\(.*\)',  # Remove anything in parentheses
+    ]
+
+    for pattern in patterns_to_remove:
+        value = re.sub(pattern, '', value, flags=re.IGNORECASE)
+
     # Remove any remaining leading whitespace
     value = value.strip()
+
+    # Remove trailing periods or commas
+    value = value.rstrip('.,')
 
     return value
 
@@ -225,7 +280,9 @@ def clean_spreadsheet(input_file):
         
         # Check for pedal in column A with price in column B
         if col_a and is_pedal_name(col_a):
+            original_text = str(col_a).strip()
             pedal_name = clean_pedal_name(col_a)
+            condition = extract_condition(original_text)
             price = None
 
             # Check column B for price
@@ -244,13 +301,17 @@ def clean_spreadsheet(input_file):
                 cleaned_data.append({
                     'person': current_person if current_person else 'Unknown',
                     'pedal_name': pedal_name,
+                    'condition': condition,
+                    'original_description': original_text,
                     'price': float(price),
                     'date': current_date
                 })
         
         # Check for pedal in column D with price in column E
         if col_d and is_pedal_name(col_d):
+            original_text = str(col_d).strip()
             pedal_name = clean_pedal_name(col_d)
+            condition = extract_condition(original_text)
             price = None
 
             if is_valid_price(col_e):
@@ -268,13 +329,17 @@ def clean_spreadsheet(input_file):
                 cleaned_data.append({
                     'person': current_person if current_person else 'Unknown',
                     'pedal_name': pedal_name,
+                    'condition': condition,
+                    'original_description': original_text,
                     'price': float(price),
                     'date': current_date
                 })
         
         # Check for pedal in column F with price in column G
         if col_f and is_pedal_name(col_f):
+            original_text = str(col_f).strip()
             pedal_name = clean_pedal_name(col_f)
+            condition = extract_condition(original_text)
             price = None
 
             if is_valid_price(col_g):
@@ -286,6 +351,8 @@ def clean_spreadsheet(input_file):
                 cleaned_data.append({
                     'person': current_person if current_person else 'Unknown',
                     'pedal_name': pedal_name,
+                    'condition': condition,
+                    'original_description': original_text,
                     'price': float(price),
                     'date': current_date
                 })
@@ -296,35 +363,81 @@ def clean_spreadsheet(input_file):
             if not is_date_value(price) and isinstance(price, (int, float)):
                 # Try to get pedal name from column A or D
                 pedal_name = None
+                original_text = None
+                condition = None
                 if col_a and is_pedal_name(col_a):
+                    original_text = str(col_a).strip()
                     pedal_name = clean_pedal_name(col_a)
+                    condition = extract_condition(original_text)
                 elif col_d and is_pedal_name(col_d):
+                    original_text = str(col_d).strip()
                     pedal_name = clean_pedal_name(col_d)
+                    condition = extract_condition(original_text)
 
                 if pedal_name:
                     cleaned_data.append({
                         'person': current_person if current_person else 'Unknown',
                         'pedal_name': pedal_name,
+                        'condition': condition,
+                        'original_description': original_text,
                         'price': float(price),
                         'date': current_date
                     })
     
     wb.close()
-    
+
     # Create DataFrame
     df = pd.DataFrame(cleaned_data)
-    
+
     # Calculate expiration date (1 year after the date)
     df['expiration_date'] = df['date'].apply(lambda x: x + timedelta(days=365))
-    
+
     # Format dates
     df['date'] = df['date'].dt.strftime('%Y-%m-%d')
     df['expiration_date'] = df['expiration_date'].dt.strftime('%Y-%m-%d')
-    
+
     # Reorder columns (excluding person column - not needed in final output)
-    df = df[['pedal_name', 'price', 'date', 'expiration_date']]
-    
+    df = df[['pedal_name', 'condition', 'price', 'date', 'expiration_date', 'original_description']]
+
     return df
+
+def analyze_duplicates(df):
+    """Analyze duplicate pedals with different prices"""
+    # Group by pedal name (case-insensitive) and show all prices
+    duplicate_analysis = []
+
+    # Create a normalized name for grouping
+    df['pedal_name_lower'] = df['pedal_name'].str.lower().str.strip()
+
+    # Find pedals with multiple entries
+    pedal_counts = df['pedal_name_lower'].value_counts()
+    duplicates = pedal_counts[pedal_counts > 1]
+
+    for pedal_lower in duplicates.index:
+        # Get all entries for this pedal
+        pedal_entries = df[df['pedal_name_lower'] == pedal_lower].copy()
+        pedal_entries = pedal_entries.sort_values('price')
+
+        # Store each entry
+        for _, row in pedal_entries.iterrows():
+            duplicate_analysis.append({
+                'pedal_name': row['pedal_name'],
+                'condition': row['condition'],
+                'price': row['price'],
+                'date': row['date'],
+                'original_description': row['original_description'],
+                'duplicate_count': len(pedal_entries),
+                'price_min': pedal_entries['price'].min(),
+                'price_max': pedal_entries['price'].max(),
+                'price_avg': round(pedal_entries['price'].mean(), 2)
+            })
+
+    if duplicate_analysis:
+        dup_df = pd.DataFrame(duplicate_analysis)
+        dup_df = dup_df.sort_values(['pedal_name', 'price'])
+        return dup_df
+    else:
+        return pd.DataFrame()  # Empty dataframe if no duplicates
 
 if __name__ == "__main__":
     print("Cleaning pedal pricing spreadsheet...")
@@ -343,24 +456,54 @@ if __name__ == "__main__":
     
     # Clean the data
     cleaned_df = clean_spreadsheet(str(input_file))
-    
+
     print(f"\nExtracted {len(cleaned_df)} pedal entries")
     print("\nFirst 20 entries:")
-    print(cleaned_df.head(20).to_string(index=False))
-    
+    display_df = cleaned_df[['pedal_name', 'condition', 'price', 'date']].head(20)
+    print(display_df.to_string(index=False))
+
     print("\n\nLast 20 entries:")
-    print(cleaned_df.tail(20).to_string(index=False))
-    
+    display_df = cleaned_df[['pedal_name', 'condition', 'price', 'date']].tail(20)
+    print(display_df.to_string(index=False))
+
+    # Analyze duplicates
+    print("\n" + "="*80)
+    print("DUPLICATE ANALYSIS")
+    print("="*80)
+    duplicates_df = analyze_duplicates(cleaned_df)
+
+    if not duplicates_df.empty:
+        print(f"\nFound {duplicates_df['pedal_name'].nunique()} pedals with multiple entries:")
+        print(f"Total duplicate entries: {len(duplicates_df)}")
+        print("\nDuplicate pedals with price variations:")
+        dup_display = duplicates_df[['pedal_name', 'condition', 'price', 'price_min', 'price_max', 'price_avg', 'duplicate_count']]
+        print(dup_display.to_string(index=False))
+
+        # Save duplicates analysis
+        dup_output = script_dir / 'duplicate_analysis.xlsx'
+        duplicates_df.to_excel(str(dup_output), index=False, sheet_name='Duplicates')
+        print(f"\n✅ Duplicate analysis saved to: {dup_output}")
+    else:
+        print("\nNo duplicate pedals found!")
+
     # Save to new Excel file (in project root)
     output_file = script_dir / 'cleaned_pedal_pricing.xlsx'
-    cleaned_df.to_excel(str(output_file), index=False, sheet_name='Cleaned_Data')
+
+    # For the final output, remove the original_description column
+    final_df = cleaned_df[['pedal_name', 'condition', 'price', 'date', 'expiration_date']].copy()
+    final_df.to_excel(str(output_file), index=False, sheet_name='Cleaned_Data')
     print(f"\n✅ Cleaned data saved to: {output_file}")
-    
+
     # Also save as CSV for easier integration
     csv_output = script_dir / 'cleaned_pedal_pricing.csv'
-    cleaned_df.to_csv(str(csv_output), index=False)
+    final_df.to_csv(str(csv_output), index=False)
     print(f"✅ CSV version saved to: {csv_output}")
-    
+
+    # Save full version with original descriptions for reference
+    full_output = script_dir / 'cleaned_pedal_pricing_with_descriptions.xlsx'
+    cleaned_df.to_excel(str(full_output), index=False, sheet_name='Full_Data')
+    print(f"✅ Full data with descriptions saved to: {full_output}")
+
     # Show summary statistics
     print("\n" + "="*80)
     print("SUMMARY STATISTICS")
@@ -370,3 +513,8 @@ if __name__ == "__main__":
     print(f"Date range: {cleaned_df['date'].min()} to {cleaned_df['date'].max()}")
     print(f"\nPrice statistics:")
     print(cleaned_df['price'].describe())
+
+    # Condition breakdown
+    print(f"\nCondition breakdown:")
+    condition_counts = cleaned_df['condition'].value_counts(dropna=False)
+    print(condition_counts)
